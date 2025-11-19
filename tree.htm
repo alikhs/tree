@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Interactive Binary Tree Simulator</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; margin: 16px; background: #f7fbff; color:#222; }
+    h1 { margin-bottom: 6px; }
+    #app { display: flex; gap: 20px; }
+    #controls { width: 320px; background: #ffffff; padding: 14px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    #canvasWrap { flex: 1; min-height: 520px; background: linear-gradient(180deg,#fff 0%,#f0f7ff 100%); border-radius:8px; padding: 12px; position: relative; }
+    .btn { display:inline-block; margin:4px 4px 8px 0; padding:8px 10px; border-radius:6px; border:none; background:#1976d2; color:#fff; cursor:pointer; }
+    .btn.secondary { background:#6b7280; }
+    .btn.warn { background:#d9534f; }
+    label { display:block; margin-top:8px; font-size:13px; color:#333; }
+    input[type="text"], input[type="number"], select { width:100%; padding:8px; margin-top:6px; box-sizing:border-box; border-radius:6px; border:1px solid #cbd5e1; }
+    #treeCanvas { position:relative; width:100%; height:520px; overflow:auto; }
+    .node { position:absolute; width:54px; height:54px; border-radius:50%; background:#0ea5e9; color:#fff; display:flex; align-items:center; justify-content:center; box-shadow: 0 4px 8px rgba(2,6,23,0.12); cursor:pointer; user-select:none; transition: transform .15s, box-shadow .15s; }
+    .node.selected { outline:4px solid #facc15; transform:scale(1.06); }
+    .node.highlight { background:#f97316; box-shadow:0 6px 14px rgba(249,115,22,0.25); }
+    .edge { position:absolute; width:2px; background:#1e293b; transform-origin: top left; }
+    #log { margin-top:12px; background:#fff; padding:10px; border-radius:6px; max-height:140px; overflow:auto; border:1px solid #e6eef8; font-size:13px; }
+    #legend { font-size:13px; margin-top:8px; color:#374151; }
+    .small { font-size:12px; color:#555; }
+    #speed { width:100%; }
+  </style>
+</head>
+<body>
+  <h1>Interactive Binary Tree Simulator</h1>
+  <p class="small">Klik node untuk memilih. Tambah anak kiri/kanan pada node terpilih. Jalankan traversal untuk melihat animasi pre/in/post-order.</p>
+
+  <div id="app">
+    <div id="controls">
+      <label>Node Value</label>
+      <input type="text" id="nodeValue" value="A" />
+
+      <label>Selected Node: <span id="selectedLabel">None</span></label>
+
+      <div style="margin-top:8px;">
+        <button class="btn" id="addRootBtn">Add Root</button>
+        <button class="btn" id="addLeftBtn">Add Left</button>
+        <button class="btn" id="addRightBtn">Add Right</button>
+        <button class="btn warn" id="deleteBtn">Delete Node</button>
+      </div>
+
+      <label>Traversals</label>
+      <div style="margin-bottom:6px;">
+        <button class="btn" id="preBtn">Pre-Order</button>
+        <button class="btn" id="inBtn">In-Order</button>
+        <button class="btn" id="postBtn">Post-Order</button>
+        <button class="btn secondary" id="stopBtn">Stop</button>
+      </div>
+
+      <label>Animation Speed (ms)</label>
+      <input id="speed" type="number" value="600" min="50" step="50" />
+
+      <label>Examples</label>
+      <select id="examples">
+        <option value="">-- choose example --</option>
+        <option value="example1">Example: A,B,C,D,E,F</option>
+        <option value="bst">BST Example: 10,5,20,15,30</option>
+        <option value="skew">Skewed Left: 5,4,3,2</option>
+      </select>
+      <div id="legend">
+        <div><strong>Legend:</strong></div>
+        <div>- <span style="color:#0ea5e9">Blue</span> node: normal</div>
+        <div>- <span style="color:#facc15">Yellow outline</span>: selected node</div>
+        <div>- <span style="color:#f97316">Orange</span>: highlighted during traversal</div>
+      </div>
+
+      <div id="log" aria-live="polite"></div>
+    </div>
+
+    <div id="canvasWrap">
+      <div id="treeCanvas"></div>
+    </div>
+  </div>
+
+  <script>
+  // Simple binary tree model and renderer
+  (function(){
+    let nodes = {}; // id -> {id, value, left, right, parent}
+    let rootId = null;
+    let nodeCounter = 0;
+    let selected = null;
+    let animing = false;
+
+    const treeCanvas = document.getElementById('treeCanvas');
+    const nodeValueInput = document.getElementById('nodeValue');
+    const selectedLabel = document.getElementById('selectedLabel');
+    const logEl = document.getElementById('log');
+    const speedInput = document.getElementById('speed');
+
+    function log(msg){
+      const p = document.createElement('div');
+      p.textContent = msg;
+      logEl.appendChild(p);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function createNode(value){
+      const id = 'n' + (++nodeCounter);
+      nodes[id] = { id, value: String(value), left: null, right: null, parent: null };
+      return nodes[id];
+    }
+
+    function addRoot(value){
+      if(rootId){
+        alert('Root already exists. Delete root first to add new root.');
+        return;
+      }
+      const n = createNode(value);
+      rootId = n.id;
+      render();
+      log(`Added root: ${n.value}`);
+    }
+
+    function addChild(side){
+      if(!selected){ alert('Pilih node terlebih dahulu.'); return; }
+      const parent = nodes[selected];
+      if(side === 'left' && parent.left){ alert('Left child sudah ada.'); return; }
+      if(side === 'right' && parent.right){ alert('Right child sudah ada.'); return; }
+      const val = nodeValueInput.value || 'X';
+      const child = createNode(val);
+      child.parent = parent.id;
+      if(side === 'left') parent.left = child.id;
+      else parent.right = child.id;
+      render();
+      log(`Added ${side} child ${val} to ${parent.value}`);
+    }
+
+    function deleteNode(){
+      if(!selected){ alert('Pilih node terlebih dahulu.'); return; }
+      const id = selected;
+      const node = nodes[id];
+      // can't delete if has children (force delete subtree)
+      function removeSubtree(remId){
+        const rem = nodes[remId];
+        if(rem.left) removeSubtree(rem.left);
+        if(rem.right) removeSubtree(rem.right);
+        delete nodes[remId];
+      }
+      // detach from parent
+      if(node.parent){
+        const p = nodes[node.parent];
+        if(p.left === id) p.left = null;
+        if(p.right === id) p.right = null;
+      } else {
+        // deleting root
+        rootId = null;
+      }
+      removeSubtree(id);
+      selected = null;
+      selectedLabel.textContent = 'None';
+      render();
+      log(`Deleted node ${node.value} and its subtree`);
+    }
+
+    function setSelected(id){
+      selected = id;
+      selectedLabel.textContent = id ? nodes[id].value + ' (' + id + ')' : 'None';
+      render();
+    }
+
+    function clearCanvas(){
+      treeCanvas.innerHTML = '';
+    }
+
+    // layout: compute x positions using inorder traversal index
+    function computeLayout(){
+      const positions = {}; // id -> {x,y}
+      let index = 0;
+      function inorder(id, depth){
+        if(!id) return;
+        const node = nodes[id];
+        inorder(node.left, depth+1);
+        const x = index++;
+        positions[id] = { x, depth };
+        inorder(node.right, depth+1);
+      }
+      if(rootId) inorder(rootId, 0);
+      // convert to pixels
+      const gapX = 90;
+      const gapY = 110;
+      for(const id in positions){
+        positions[id].px = positions[id].x * gapX + 40;
+        positions[id].py = positions[id].depth * gapY + 30;
+      }
+      return positions;
+    }
+
+    function render(){
+      clearCanvas();
+      if(!rootId){
+        treeCanvas.innerHTML = '<div style="padding:30px; color:#555;">Empty tree — add root to start</div>';
+        return;
+      }
+      const pos = computeLayout();
+      // draw edges first
+      for(const id in nodes){
+        const n = nodes[id];
+        if(n.left){
+          drawEdge(pos[id].px + 27, pos[id].py + 54, pos[n.left].px + 27, pos[n.left].py, id+'-'+n.left);
+        }
+        if(n.right){
+          drawEdge(pos[id].px + 27, pos[id].py + 54, pos[n.right].px + 27, pos[n.right].py, id+'-'+n.right);
+        }
+      }
+      // draw nodes
+      for(const id in nodes){
+        const n = nodes[id];
+        const d = document.createElement('div');
+        d.className = 'node';
+        d.style.left = pos[id].px + 'px';
+        d.style.top = pos[id].py + 'px';
+        d.textContent = n.value;
+        d.dataset.id = id;
+        if(selected === id) d.classList.add('selected');
+        treeCanvas.appendChild(d);
+        d.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setSelected(id);
+        });
+      }
+      // canvas click to deselect
+      treeCanvas.addEventListener('click', () => setSelected(null));
+    }
+
+    function drawEdge(x1,y1,x2,y2, key){
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.sqrt(dx*dx + dy*dy);
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      const edge = document.createElement('div');
+      edge.className = 'edge';
+      edge.style.left = x1 + 'px';
+      edge.style.top = y1 + 'px';
+      edge.style.width = len + 'px';
+      edge.style.height = '2px';
+      edge.style.transform = `rotate(${angle}deg)`;
+      edge.id = 'edge-'+key;
+      treeCanvas.appendChild(edge);
+    }
+
+    // traversal generators returning array of ids
+    function preOrderList(id, out){
+      if(!id) return;
+      out.push(id);
+      preOrderList(nodes[id].left, out);
+      preOrderList(nodes[id].right, out);
+    }
+    function inOrderList(id, out){
+      if(!id) return;
+      inOrderList(nodes[id].left, out);
+      out.push(id);
+      inOrderList(nodes[id].right, out);
+    }
+    function postOrderList(id, out){
+      if(!id) return;
+      postOrderList(nodes[id].left, out);
+      postOrderList(nodes[id].right, out);
+      out.push(id);
+    }
+
+    async function animateList(list){
+      if(animing) return;
+      animing = true;
+      const ms = Math.max(50, parseInt(speedInput.value) || 400);
+      for(const id of list){
+        if(!animing) break;
+        const el = [...treeCanvas.querySelectorAll('.node')].find(x => x.dataset.id === id);
+        if(el){
+          el.classList.add('highlight');
+          log(`Visit: ${nodes[id].value} (${id})`);
+        }
+        await new Promise(r => setTimeout(r, ms));
+        if(el) el.classList.remove('highlight');
+      }
+      animing = false;
+    }
+
+    function stopAnimation(){
+      animing = false;
+      // remove highlights
+      [...treeCanvas.querySelectorAll('.node.highlight')].forEach(n => n.classList.remove('highlight'));
+      log('Animation stopped');
+    }
+
+    // UI hooks
+    document.getElementById('addRootBtn').addEventListener('click', () => addRoot(nodeValueInput.value || 'R'));
+    document.getElementById('addLeftBtn').addEventListener('click', () => addChild('left'));
+    document.getElementById('addRightBtn').addEventListener('click', () => addChild('right'));
+    document.getElementById('deleteBtn').addEventListener('click', deleteNode);
+
+    document.getElementById('preBtn').addEventListener('click', () => {
+      if(!rootId){ alert('Tree kosong.'); return; }
+      log('Start Pre-Order traversal');
+      const list = []; preOrderList(rootId, list);
+      animateList(list);
+    });
+    document.getElementById('inBtn').addEventListener('click', () => {
+      if(!rootId){ alert('Tree kosong.'); return; }
+      log('Start In-Order traversal');
+      const list = []; inOrderList(rootId, list);
+      animateList(list);
+    });
+    document.getElementById('postBtn').addEventListener('click', () => {
+      if(!rootId){ alert('Tree kosong.'); return; }
+      log('Start Post-Order traversal');
+      const list = []; postOrderList(rootId, list);
+      animateList(list);
+    });
+    document.getElementById('stopBtn').addEventListener('click', stopAnimation);
+
+    document.getElementById('examples').addEventListener('change', (e) => {
+      const v = e.target.value;
+      // reset
+      nodes = {}; rootId = null; nodeCounter = 0; selected = null; logEl.innerHTML='';
+      if(v === 'example1'){
+        // A B C D E F tree
+        const A = createNode('A'); rootId = A.id;
+        const B = createNode('B'); const C = createNode('C'); A.left = B.id; A.right = C.id; B.parent = A.id; C.parent = A.id;
+        const D = createNode('D'); const E = createNode('E'); B.left = D.id; B.right = E.id; D.parent = B.id; E.parent = B.id;
+        const F = createNode('F'); C.right = F.id; F.parent = C.id;
+      } else if(v === 'bst'){
+        // 10,5,20,15,30
+        const n10 = createNode('10'); rootId = n10.id;
+        const n5 = createNode('5'); n10.left = n5.id; n5.parent = n10.id;
+        const n20 = createNode('20'); n10.right = n20.id; n20.parent = n10.id;
+        const n15 = createNode('15'); n20.left = n15.id; n15.parent = n20.id;
+        const n30 = createNode('30'); n20.right = n30.id; n30.parent = n20.id;
+      } else if(v === 'skew'){
+        const n5 = createNode('5'); rootId = n5.id;
+        const n4 = createNode('4'); n5.left = n4.id; n4.parent = n5.id;
+        const n3 = createNode('3'); n4.left = n3.id; n3.parent = n4.id;
+        const n2 = createNode('2'); n3.left = n2.id; n2.parent = n3.id;
+      }
+      render();
+    });
+
+    // initial render (empty)
+    render();
+
+    // expose for debugging
+    window._tree = { nodes, getRoot: () => rootId, render };
+  })();
+  </script>
+</body>
+</html>
