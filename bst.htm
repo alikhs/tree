@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Interactive BST Simulator</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Inter, Arial, Helvetica, sans-serif; margin: 18px; background:#f7fbff; color:#0f172a; }
+    h1 { margin:0 0 6px 0; font-size:20px; }
+    #app { display:flex; gap:18px; align-items:flex-start; }
+    #controls { width:340px; background:#fff; padding:14px; border-radius:8px; box-shadow:0 6px 18px rgba(2,6,23,0.06); }
+    label { display:block; margin-top:10px; font-size:13px; color:#344054; }
+    input[type="text"], input[type="number"], select, textarea { width:100%; padding:8px; margin-top:6px; box-sizing:border-box; border-radius:6px; border:1px solid #e6eef8; }
+    .btn { display:inline-block; margin:6px 6px 6px 0; padding:8px 10px; border-radius:6px; border:none; background:#0ea5e9; color:#fff; cursor:pointer; }
+    .btn.warn { background:#ef4444; }
+    .btn.alt { background:#64748b; }
+    #canvasWrap { flex:1; min-height:560px; background:linear-gradient(180deg,#fff 0%,#f0f7ff 100%); border-radius:8px; padding:12px; position:relative; box-shadow:0 6px 18px rgba(2,6,23,0.04); }
+    #bstCanvas { position:relative; width:100%; height:560px; overflow:auto; }
+    .node { position:absolute; width:56px; height:56px; border-radius:50%; background:#0369a1; color:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 14px rgba(2,6,23,0.12); font-weight:600; cursor:pointer; transition:transform .12s, box-shadow .12s; }
+    .node.selected { outline:4px solid #fb923c; transform:scale(1.06); }
+    .node.searching { background:#f97316; box-shadow:0 8px 20px rgba(249,115,22,0.22); }
+    .node.found { background:#10b981; box-shadow:0 8px 20px rgba(16,185,129,0.22); }
+    .edge { position:absolute; width:2px; background:#0f172a; transform-origin: top left; opacity:0.7; }
+    #log { margin-top:12px; background:#fff; padding:10px; border-radius:8px; max-height:150px; overflow:auto; border:1px solid #e6eef8; font-size:13px; color:#334155; }
+    .small { font-size:12px; color:#475569; }
+    #controls .row { display:flex; gap:8px; }
+    #controls .row .btn { flex:1; }
+    #exportArea { height:80px; }
+    #speed { width:100%; }
+  </style>
+</head>
+<body>
+  <h1>Interactive BST Simulator</h1>
+  <p class="small">Insert numbers/strings into BST (values compared numerically if numeric). Visualize insertion, deletion, search (step-by-step) and traversals.</p>
+
+  <div id="app">
+    <div id="controls">
+      <label>Value to Insert / Delete / Search</label>
+      <input type="text" id="valueInput" placeholder="e.g. 50 or apple" />
+
+      <div class="row">
+        <button class="btn" id="insertBtn">Insert</button>
+        <button class="btn warn" id="deleteBtn">Delete</button>
+        <button class="btn alt" id="searchBtn">Search</button>
+      </div>
+
+      <label>Traversals & Animation</label>
+      <div class="row">
+        <button class="btn" id="preBtn">Pre-Order</button>
+        <button class="btn" id="inBtn">In-Order</button>
+        <button class="btn" id="postBtn">Post-Order</button>
+      </div>
+
+      <label>Animation Speed (ms)</label>
+      <input type="number" id="speed" value="600" min="50" step="50" />
+
+      <label>Examples / Utilities</label>
+      <select id="examples">
+        <option value="">-- select example --</option>
+        <option value="nums">Numbers: 50,30,70,20,40,60,80</option>
+        <option value="bst">BST demo: 10,5,20,15,30</option>
+        <option value="skew">Skewed: 5,4,3,2,1</option>
+      </select>
+      <div style="margin-top:8px">
+        <button class="btn alt" id="clearBtn">Clear Tree</button>
+        <button class="btn" id="exportBtn">Export JSON</button>
+      </div>
+
+      <label>Export / Import Tree (JSON)</label>
+      <textarea id="exportArea" placeholder='{"root":...}'></textarea>
+      <div style="margin-top:6px" class="row">
+        <button class="btn" id="loadBtn">Load JSON</button>
+      </div>
+
+      <div id="log" aria-live="polite"></div>
+    </div>
+
+    <div id="canvasWrap">
+      <div id="bstCanvas"></div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  // BST model
+  let nodes = {}; // id -> {id,value,left,right,parent}
+  let rootId = null;
+  let counter = 0;
+  let selected = null;
+  let animing = false;
+
+  const canvas = document.getElementById('bstCanvas');
+  const valueInput = document.getElementById('valueInput');
+  const logEl = document.getElementById('log');
+  const speedInput = document.getElementById('speed');
+
+  function log(msg){
+    const d = document.createElement('div'); d.textContent = msg; logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function createNode(value){
+    const id = 'n' + (++counter);
+    nodes[id] = { id, value: value, left: null, right: null, parent: null };
+    return nodes[id];
+  }
+
+  // value comparator: numeric if both numeric else string compare
+  function cmp(a,b){
+    const an = parseFloat(a);
+    const bn = parseFloat(b);
+    const aIsNum = !isNaN(an) && String(a).trim() !== '';
+    const bIsNum = !isNaN(bn) && String(b).trim() !== '';
+    if(aIsNum && bIsNum){
+      if(an < bn) return -1;
+      if(an > bn) return 1;
+      return 0;
+    }
+    const sa = String(a), sb = String(b);
+    if(sa < sb) return -1;
+    if(sa > sb) return 1;
+    return 0;
+  }
+
+  function insertValue(value){
+    const newNode = createNode(value);
+    if(!rootId){
+      rootId = newNode.id;
+      render();
+      log(`Inserted root ${value}`);
+      return;
+    }
+    let cur = nodes[rootId];
+    while(true){
+      if(cmp(value, cur.value) < 0){
+        if(cur.left){ cur = nodes[cur.left]; continue; }
+        cur.left = newNode.id; newNode.parent = cur.id; break;
+      } else {
+        if(cur.right){ cur = nodes[cur.right]; continue; }
+        cur.right = newNode.id; newNode.parent = cur.id; break;
+      }
+    }
+    render();
+    log(`Inserted ${value}`);
+  }
+
+  // search with path (ids)
+  function searchPath(value){
+    const path = [];
+    let cur = rootId ? nodes[rootId] : null;
+    while(cur){
+      path.push(cur.id);
+      const c = cmp(value, cur.value);
+      if(c === 0) return { found:true, path };
+      if(c < 0) cur = cur.left ? nodes[cur.left] : null;
+      else cur = cur.right ? nodes[cur.right] : null;
+    }
+    return { found:false, path };
+  }
+
+  // find min node in subtree
+  function minNode(id){
+    let cur = nodes[id];
+    while(cur.left) cur = nodes[cur.left];
+    return cur;
+  }
+
+  // delete node by value (uses recursive helper)
+  function deleteValue(value){
+    function deleteRec(id, val){
+      if(!id) return null;
+      const node = nodes[id];
+      const c = cmp(val, node.value);
+      if(c < 0){
+        node.left = deleteRec(node.left, val);
+        if(node.left) nodes[node.left].parent = node.id;
+        return id;
+      } else if(c > 0){
+        node.right = deleteRec(node.right, val);
+        if(node.right) nodes[node.right].parent = node.id;
+        return id;
+      } else {
+        // delete this node
+        // case 1: leaf
+        if(!node.left && !node.right){
+          delete nodes[id];
+          return null;
+        }
+        // case 2: one child
+        if(!node.left){
+          const r = node.right; nodes[r].parent = node.parent || null; delete nodes[id]; return r;
+        }
+        if(!node.right){
+          const l = node.left; nodes[l].parent = node.parent || null; delete nodes[id]; return l;
+        }
+        // case 3: two children -> find successor (min in right)
+        const succ = minNode(node.right);
+        node.value = succ.value;
+        node.right = deleteRec(node.right, succ.value);
+        if(node.right) nodes[node.right].parent = node.id;
+        return id;
+      }
+    }
+
+    if(!rootId){ log('Tree empty'); return; }
+    const beforeCount = Object.keys(nodes).length;
+    rootId = deleteRec(rootId, value);
+    // if rootId becomes null, ensure cleared
+    if(rootId === null) rootId = null;
+    render();
+    const afterCount = Object.keys(nodes).length;
+    if(afterCount < beforeCount) log(`Deleted ${value} (if existed)`);
+    else log(`${value} not found`);
+  }
+
+  // layout by inorder index
+  function computeLayout(){
+    const pos = {};
+    let idx = 0;
+    function inorder(id, depth){
+      if(!id) return;
+      inorder(nodes[id].left, depth+1);
+      pos[id] = { x: idx++, depth };
+      inorder(nodes[id].right, depth+1);
+    }
+    if(rootId) inorder(rootId, 0);
+    const gapX = 100, gapY = 110;
+    for(const id in pos){
+      pos[id].px = pos[id].x * gapX + 30;
+      pos[id].py = pos[id].depth * gapY + 20;
+    }
+    return pos;
+  }
+
+  function clearCanvas(){ canvas.innerHTML = ''; }
+
+  function drawEdge(x1,y1,x2,y2, key){
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    const ang = Math.atan2(dy,dx) * 180/Math.PI;
+    const edge = document.createElement('div');
+    edge.className = 'edge';
+    edge.style.left = x1 + 'px';
+    edge.style.top = y1 + 'px';
+    edge.style.width = len + 'px';
+    edge.style.transform = `rotate(${ang}deg)`;
+    edge.id = 'e-'+key;
+    canvas.appendChild(edge);
+  }
+
+  function render(){
+    clearCanvas();
+    if(!rootId){
+      canvas.innerHTML = '<div style="padding:30px;color:#475569;">Tree is empty — insert values to start</div>';
+      return;
+    }
+    const pos = computeLayout();
+    // draw edges
+    for(const id in nodes){
+      const n = nodes[id];
+      if(n.left && pos[n.left]){
+        drawEdge(pos[id].px+28, pos[id].py+56, pos[n.left].px+28, pos[n.left].py+28, id+'-'+n.left);
+      }
+      if(n.right && pos[n.right]){
+        drawEdge(pos[id].px+28, pos[id].py+56, pos[n.right].px+28, pos[n.right].py+28, id+'-'+n.right);
+      }
+    }
+    // draw nodes
+    for(const id in nodes){
+      const n = nodes[id];
+      const el = document.createElement('div');
+      el.className = 'node';
+      el.style.left = pos[id].px + 'px';
+      el.style.top = pos[id].py + 'px';
+      el.textContent = n.value;
+      el.dataset.id = id;
+      if(selected === id) el.classList.add('selected');
+      canvas.appendChild(el);
+      el.addEventListener('click', (e)=>{ e.stopPropagation(); setSelected(id); });
+    }
+    canvas.addEventListener('click', ()=> setSelected(null));
+  }
+
+  function setSelected(id){
+    selected = id;
+    // highlight selected node visually by re-render
+    render();
+  }
+
+  // traversal lists
+  function preList(id, out){ if(!id) return; out.push(id); preList(nodes[id].left, out); preList(nodes[id].right, out); }
+  function inList(id, out){ if(!id) return; inList(nodes[id].left, out); out.push(id); inList(nodes[id].right, out); }
+  function postList(id, out){ if(!id) return; postList(nodes[id].left, out); postList(nodes[id].right, out); out.push(id); }
+
+  async function animate(ids, highlightFound){
+    if(animing) return;
+    animing = true;
+    const ms = Math.max(30, parseInt(speedInput.value) || 400);
+    for(const id of ids){
+      if(!animing) break;
+      const el = [...canvas.querySelectorAll('.node')].find(x=>x.dataset.id===id);
+      if(el){
+        el.classList.add('searching');
+        log(`Visit ${nodes[id].value}`);
+      }
+      await new Promise(r=>setTimeout(r, ms));
+      if(el){
+        el.classList.remove('searching');
+      }
+      if(highlightFound && ids[ids.length-1] === id){
+        const foundEl = el;
+        if(foundEl){
+          foundEl.classList.add('found');
+          await new Promise(r=>setTimeout(r, ms));
+          foundEl.classList.remove('found');
+        }
+      }
+    }
+    animing = false;
+  }
+
+  // UI events
+  document.getElementById('insertBtn').addEventListener('click', ()=>{
+    const v = valueInput.value.trim(); if(!v){ alert('Enter a value'); return; }
+    insertValue(v); valueInput.value='';
+  });
+  document.getElementById('deleteBtn').addEventListener('click', ()=>{
+    const v = valueInput.value.trim(); if(!v){ alert('Enter a value to delete'); return; }
+    deleteValue(v); valueInput.value='';
+  });
+  document.getElementById('searchBtn').addEventListener('click', async ()=>{
+    const v = valueInput.value.trim(); if(!v){ alert('Enter a value to search'); return; }
+    const res = searchPath(v);
+    log(`Search path: ${res.path.map(id=>nodes[id].value).join(' -> ')}`);
+    await animate(res.path, res.found);
+    if(res.found) log(`Found ${v}`); else log(`${v} not found`);
+  });
+
+  document.getElementById('preBtn').addEventListener('click', ()=>{
+    if(!rootId){ alert('Empty tree'); return; }
+    const list=[]; preList(rootId, list); animate(list, false);
+  });
+  document.getElementById('inBtn').addEventListener('click', ()=>{
+    if(!rootId){ alert('Empty tree'); return; }
+    const list=[]; inList(rootId, list); animate(list, false);
+  });
+  document.getElementById('postBtn').addEventListener('click', ()=>{
+    if(!rootId){ alert('Empty tree'); return; }
+    const list=[]; postList(rootId, list); animate(list, false);
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', ()=>{
+    nodes={}; rootId=null; counter=0; selected=null; render(); log('Cleared tree');
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', ()=>{
+    const json = exportTree(); document.getElementById('exportArea').value = JSON.stringify(json, null, 2);
+    log('Exported JSON');
+  });
+
+  document.getElementById('loadBtn').addEventListener('click', ()=>{
+    const txt = document.getElementById('exportArea').value.trim();
+    if(!txt){ alert('Paste JSON into area'); return; }
+    try{
+      const obj = JSON.parse(txt);
+      loadTree(obj);
+      log('Loaded JSON');
+    }catch(e){ alert('Invalid JSON'); }
+  });
+
+  document.getElementById('examples').addEventListener('change', (e)=>{
+    const v = e.target.value;
+    nodes={}; rootId=null; counter=0; selected=null; logEl.innerHTML='';
+    if(v==='nums'){
+      [50,30,70,20,40,60,80].forEach(x=> insertValue(String(x)));
+    } else if(v==='bst'){
+      [10,5,20,15,30].forEach(x=> insertValue(String(x)));
+    } else if(v==='skew'){
+      [5,4,3,2,1].forEach(x=> insertValue(String(x)));
+    }
+    render();
+  });
+
+  // export tree to JSON (recursive)
+  function exportTree(){
+    function nodeToObj(id){
+      if(!id) return null;
+      const n = nodes[id];
+      return { value: n.value, left: nodeToObj(n.left), right: nodeToObj(n.right) };
+    }
+    return { root: nodeToObj(rootId) };
+  }
+
+  // load tree from JSON
+  function loadTree(obj){
+    nodes={}; rootId=null; counter=0; selected=null;
+    function build(nodeObj, parent){
+      if(!nodeObj) return null;
+      const n = createNode(nodeObj.value);
+      n.parent = parent;
+      // set root if not exists
+      if(!rootId) rootId = n.id;
+      // build children
+      if(nodeObj.left) { const l = build(nodeObj.left, n.id); n.left = l ? l.id : null; }
+      if(nodeObj.right){ const r = build(nodeObj.right, n.id); n.right = r ? r.id : null; }
+      return n;
+    }
+    if(obj && obj.root) build(obj.root, null);
+    render();
+  }
+
+  // initial render
+  render();
+
+  // expose for debugging
+  window._bst = { nodes, createNode, insertValue, deleteValue, render };
+})();
+</script>
+</body>
+</html>
