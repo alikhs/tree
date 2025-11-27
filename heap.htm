@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Interactive Heap & Priority Queue Simulator</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Inter, Arial, Helvetica, sans-serif; margin: 16px; background: #f8fbff; color:#172554; }
+    h1 { margin: 0 0 8px 0; }
+    #app { display:flex; gap:18px; align-items:flex-start; }
+    #controls { width:340px; background:#fff; padding:14px; border-radius:10px; box-shadow:0 6px 18px rgba(2,6,23,0.08); }
+    #canvas { flex:1; min-height:520px; background:linear-gradient(180deg,#fff,#eef7ff); border-radius:10px; padding:12px; position:relative; }
+    label{display:block; margin-top:10px; font-size:13px; color:#0f172a;}
+    input[type=text], input[type=number], select { width:100%; padding:8px; margin-top:6px; border-radius:8px; border:1px solid #cbd5e1; box-sizing:border-box;}
+    .btn { display:inline-block; margin:6px 6px 10px 0; padding:8px 12px; border-radius:8px; border:none; background:#0369a1; color:#fff; cursor:pointer; }
+    .btn.warn { background:#dc2626; }
+    .btn.gray { background:#64748b; }
+    #arrayView { margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; }
+    .cell { min-width:50px; height:44px; border-radius:8px; background:#0ea5e9; color:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 12px rgba(2,6,23,0.08); font-weight:600; }
+    .cell.index { background:#e2e8f0; color:#0b1220; font-weight:500; }
+    #treeCanvas { width:100%; height:420px; position:relative; overflow:auto; margin-top:12px; }
+    .heap-node { position:absolute; width:56px; height:56px; border-radius:50%; background:#0ea5e9; color:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 18px rgba(2,6,23,0.12); transition:transform .18s, box-shadow .18s, background .18s; }
+    .heap-node.highlight { background:#f97316; transform:scale(1.08); box-shadow:0 12px 26px rgba(249,115,22,0.22); }
+    .edge { position:absolute; height:2px; background:#1f2937; transform-origin:left top; }
+    #log { margin-top:12px; background:#fff; padding:10px; border-radius:8px; max-height:140px; overflow:auto; border:1px solid #e6eef8; font-size:13px; color:#0b1220; }
+    .small { font-size:13px; color:#475569; }
+    .controls-row { display:flex; gap:8px; margin-top:6px; }
+    #mode { margin-top:6px; }
+    #speed { width:100%; margin-top:6px; }
+  </style>
+</head>
+<body>
+  <h1>Interactive Heap & Priority Queue Simulator</h1>
+  <p class="small">Pilih tipe heap (Min/Max). Masukkan nilai lalu gunakan Insert / Extract untuk melihat operasi heapify (bubble-up / bubble-down) secara visual.</p>
+
+  <div id="app">
+    <div id="controls">
+      <label>Heap Mode</label>
+      <select id="mode">
+        <option value="min">Min-Heap</option>
+        <option value="max">Max-Heap</option>
+      </select>
+
+      <label>Value to insert</label>
+      <input type="number" id="valueInput" value="7" />
+
+      <div class="controls-row">
+        <button class="btn" id="insertBtn">Insert</button>
+        <button class="btn warn" id="extractBtn">Extract Root</button>
+        <button class="btn gray" id="clearBtn">Clear</button>
+      </div>
+
+      <label>Animation Speed (ms)</label>
+      <input type="number" id="speed" value="500" min="50" step="50" />
+
+      <label>Array Representation</label>
+      <div id="arrayView"></div>
+
+      <label>Examples</label>
+      <select id="examples">
+        <option value="">-- choose example --</option>
+        <option value="example1">[5,8,12,10,15,20,13]</option>
+        <option value="example2">[20,18,15,10,12,8,5] (Max)</option>
+        <option value="random">Random 10 values</option>
+      </select>
+
+      <div id="log" aria-live="polite"></div>
+    </div>
+
+    <div id="canvas">
+      <div id="treeCanvas"></div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  let heap = []; // array
+  let mode = 'min';
+  let animing = false;
+  const treeCanvas = document.getElementById('treeCanvas');
+  const arrayView = document.getElementById('arrayView');
+  const logEl = document.getElementById('log');
+  const speedInput = document.getElementById('speed');
+
+  function log(msg){
+    const p = document.createElement('div');
+    p.textContent = msg;
+    logEl.appendChild(p);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function swap(i,j){
+    const tmp = heap[i]; heap[i] = heap[j]; heap[j] = tmp;
+  }
+
+  function compare(a,b){
+    if(mode === 'min') return a < b;
+    return a > b;
+  }
+
+  function heapifyUp(idx, animate=true){
+    if(idx<=0) return;
+    let i = idx;
+    async function _up(){
+      while(i>0){
+        const p = Math.floor((i-1)/2);
+        if(compare(heap[i], heap[p])){
+          if(animate) await highlightSwap(i,p);
+          swap(i,p);
+          render();
+          i = p;
+        } else break;
+      }
+    }
+    return _up();
+  }
+
+  function heapifyDown(idx, animate=true){
+    let i = idx;
+    const n = heap.length;
+    async function _down(){
+      while(true){
+        const l = 2*i+1, r = 2*i+2;
+        let target = i;
+        if(l < n && compare(heap[l], heap[target])) target = l;
+        if(r < n && compare(heap[r], heap[target])) target = r;
+        if(target !== i){
+          if(animate) await highlightSwap(i,target);
+          swap(i,target);
+          render();
+          i = target;
+        } else break;
+      }
+    }
+    return _down();
+  }
+
+  async function highlightSwap(i,j){
+    const ms = Math.max(50, parseInt(speedInput.value)||400);
+    const nodes = [...treeCanvas.querySelectorAll('.heap-node')];
+    const a = nodes.find(n=>n.dataset.index==i);
+    const b = nodes.find(n=>n.dataset.index==j);
+    if(a) a.classList.add('highlight');
+    if(b) b.classList.add('highlight');
+    log(`Compare/swap: index ${i} (${heap[i]}) ↔ index ${j} (${heap[j]})`);
+    await new Promise(r=>setTimeout(r, ms));
+    if(a) a.classList.remove('highlight');
+    if(b) b.classList.remove('highlight');
+  }
+
+  async function insert(value){
+    heap.push(value);
+    render();
+    log(`Insert: ${value} (at index ${heap.length-1})`);
+    await heapifyUp(heap.length-1, true);
+    log(`Heap after insert: [${heap.join(', ')}]`);
+  }
+
+  async function extractRoot(){
+    if(heap.length===0){ alert('Heap kosong'); return; }
+    const root = heap[0];
+    log(`Extract root: ${root}`);
+    if(heap.length===1){ heap.pop(); render(); log('Heap empty now'); return root; }
+    heap[0] = heap.pop();
+    render();
+    await heapifyDown(0, true);
+    log(`Heap after extract: [${heap.join(', ')}]`);
+    return root;
+  }
+
+  function clearHeap(){
+    heap = [];
+    render();
+    log('Heap cleared');
+  }
+
+  // render array and tree
+  function render(){
+    // array view
+    arrayView.innerHTML = '';
+    heap.forEach((v,i)=>{
+      const c = document.createElement('div');
+      c.className = 'cell';
+      c.textContent = v;
+      c.title = 'index '+i;
+      arrayView.appendChild(c);
+    });
+    // index row
+    if(heap.length>0){
+      const idxRow = document.createElement('div');
+      idxRow.style.display='flex'; idxRow.style.gap='8px'; idxRow.style.marginTop='8px';
+      heap.forEach((v,i)=>{
+        const ci = document.createElement('div');
+        ci.className='cell index';
+        ci.textContent = i;
+        idxRow.appendChild(ci);
+      });
+      arrayView.appendChild(idxRow);
+    }
+
+    // tree render
+    treeCanvas.innerHTML = '';
+    if(heap.length===0){
+      treeCanvas.innerHTML = '<div style="padding:30px;color:#475569;">Heap is empty — insert values to start</div>';
+      return;
+    }
+    // compute positions by index (breadth layout)
+    const positions = {};
+    const levelWidth = (level)=> Math.pow(2, level);
+    let nodesCount=0;
+    for(let i=0;i<heap.length;i++){
+      const level = Math.floor(Math.log2(i+1));
+      const indexInLevel = i - (Math.pow(2, level)-1);
+      const total = levelWidth(level);
+      const spacing = Math.max(40, (treeCanvas.clientWidth - 40) / total);
+      const px = indexInLevel * spacing + 20 + (treeCanvas.scrollLeft||0);
+      const py = level * 90 + 10;
+      positions[i] = {px,py,level};
+    }
+    // draw edges
+    for(let i=0;i<heap.length;i++){
+      const l = 2*i+1, r = 2*i+2;
+      if(l < heap.length) drawEdge(positions[i], positions[l]);
+      if(r < heap.length) drawEdge(positions[i], positions[r]);
+    }
+    // draw nodes
+    for(let i=0;i<heap.length;i++){
+      const n = document.createElement('div');
+      n.className = 'heap-node';
+      n.style.left = positions[i].px + 'px';
+      n.style.top = positions[i].py + 'px';
+      n.textContent = heap[i];
+      n.dataset.index = i;
+      treeCanvas.appendChild(n);
+    }
+  }
+
+  function drawEdge(a,b){
+    const x1 = a.px + 28, y1 = a.py + 28;
+    const x2 = b.px + 28, y2 = b.py + 28;
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.sqrt(dx*dx+dy*dy);
+    const angle = Math.atan2(dy,dx) * 180 / Math.PI;
+    const edge = document.createElement('div');
+    edge.className = 'edge';
+    edge.style.left = x1 + 'px';
+    edge.style.top = y1 + 'px';
+    edge.style.width = len + 'px';
+    edge.style.transform = `rotate(${angle}deg)`;
+    treeCanvas.appendChild(edge);
+  }
+
+  // UI bindings
+  document.getElementById('insertBtn').addEventListener('click', async ()=>{
+    if(animing) return;
+    const v = parseInt(document.getElementById('valueInput').value);
+    if(Number.isNaN(v)){ alert('Masukkan nilai numerik'); return; }
+    animing = true;
+    await insert(v);
+    animing = false;
+  });
+
+  document.getElementById('extractBtn').addEventListener('click', async ()=>{
+    if(animing) return;
+    animing = true;
+    await extractRoot();
+    animing = false;
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', ()=>{
+    if(animing) return;
+    clearHeap();
+  });
+
+  document.getElementById('mode').addEventListener('change', (e)=>{
+    mode = e.target.value;
+    log('Mode set to '+mode+'-heap');
+    // optionally visualize different
+    render();
+  });
+
+  document.getElementById('examples').addEventListener('change', (e)=>{
+    const v = e.target.value;
+    heap = []; logEl.innerHTML='';
+    if(v === 'example1'){
+      heap = [5,8,12,10,15,20,13];
+      mode = 'min';
+      document.getElementById('mode').value = 'min';
+    } else if(v === 'example2'){
+      heap = [20,18,15,10,12,8,5];
+      mode = 'max';
+      document.getElementById('mode').value = 'max';
+    } else if(v === 'random'){
+      heap = [];
+      for(let i=0;i<10;i++) heap.push(Math.floor(Math.random()*100));
+      // build proper heap by inserting
+      const arr = heap.slice(); heap = [];
+      (async ()=>{
+        for(const x of arr){ await insert(x); }
+      })();
+      return;
+    }
+    render();
+    log('Loaded example: '+v);
+  });
+
+  // initial
+  render();
+
+  // expose for debugging
+  window._heapSim = { getHeap:()=>heap, insert, extractRoot, render };
+})();
+</script>
+</body>
+</html>
